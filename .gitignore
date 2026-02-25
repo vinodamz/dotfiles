@@ -1,0 +1,6 @@
+# Ignore everything by default
+*
+
+# Except these files
+!CLAUDE.md
+!.gitignore
