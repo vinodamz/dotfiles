@@ -10,9 +10,9 @@ Persistent memory is stored at `~/.claude/projects/-Users-vinodamz/memory/MEMORY
 
 This home directory contains three independent Python utility projects:
 
-- **KreedoCode** (`~/KreedoCode/`) — Bulk-fetches Kreedo activity data by ID range, saves JSON responses, and generates structured questions from educational content.
-- **KreedoDataFetcher** (`~/KreedoDataFetcher/`) — CLI tool to authenticate with Kreedo's REST API and export child/activity records to Excel.
-- **VideoFrane** (`~/VideoFrane/`) — Video processing pipeline: extract frames → deduplicate → remove watermarks → convert to PowerPoint.
+- **KreedoCode** (`~/KreedoCode/`) — Bulk-fetches Kreedo activity data by ID range, saves JSON responses, and generates structured questions from educational content. → https://github.com/vinodamz/KreedoCode
+- **KreedoDataFetcher** (`~/KreedoDataFetcher/`) — CLI tool to authenticate with Kreedo's REST API and export child/activity records to Excel. → https://github.com/vinodamz/KreedoDataFetcher
+- **VideoFrane** (`~/VideoFrane/`) — Video processing pipeline: extract frames → deduplicate → remove watermarks → convert to PowerPoint. → https://github.com/vinodamz/VideoFrane
 
 ---
 
