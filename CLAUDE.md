@@ -18,6 +18,8 @@ This home directory contains three independent Python utility projects:
 
 ## KreedoCode
 
+**Repo:** https://github.com/vinodamz/KreedoCode
+
 **Python version:** 3.11 (virtualenv at `venv/`)
 
 **Setup:**
@@ -65,6 +67,8 @@ python process_live_sheet.py  # requires little-graduates-3663b17fa316.json serv
 
 ## KreedoDataFetcher
 
+**Repo:** https://github.com/vinodamz/KreedoDataFetcher
+
 **Python version:** 3.12 (virtualenv at `.venv/`)
 
 **Setup:**
@@ -105,6 +109,8 @@ The API response may nest data under a `"data"` key; all service functions handl
 ---
 
 ## VideoFrane
+
+**Repo:** https://github.com/vinodamz/VideoFrane
 
 **Python version:** 3.12 (virtualenv at `.venv/`)
 
