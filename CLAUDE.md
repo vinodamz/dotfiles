@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Memory File
+
+Persistent memory is stored at `~/.claude/projects/-Users-vinodamz/memory/MEMORY.md`. Update it when project structure, credentials, or key conventions change.
+
 ## Projects Overview
 
 This home directory contains three independent Python utility projects:
