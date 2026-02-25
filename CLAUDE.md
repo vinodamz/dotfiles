@@ -111,22 +111,44 @@ source .venv/bin/activate
 pip install opencv-python Pillow imagehash python-pptx
 ```
 
-**Run each stage independently:**
+**Pipeline — run stages in order:**
 ```bash
-# 1. Extract frames from video
+# 1. Extract frames from video (--save writes frame_XXXXXX.jpg to output_dir)
 python video_to_frame.py <video_path> [output_dir] [--save]
 
-# 2. Deduplicate frames (reads frames/, writes unique frames to cleaned/)
-python deduplicate_frames.py
+# 2. Deduplicate frames in-place (deletes duplicates from the same folder)
+python deduplicate_frames.py [frames_dir]              # default dir: frames
+python deduplicate_frames.py frames --threshold 8      # looser similarity (default: 5)
+python deduplicate_frames.py frames --dry-run          # preview without deleting
 
-# 3. Remove watermarks (reads frames or cleaned/)
-python remove_watermark.py
+# 3. Remove watermark — interactive (draw box on first image) or batch with known coords
+python remove_watermark.py <image_or_folder>                          # interactive
+python remove_watermark.py frames --coords 10 850 200 40              # batch, TELEA algo
+python remove_watermark.py frames --coords 10 850 200 40 --algo ns    # Navier-Stokes
+python remove_watermark.py frames --coords 10 850 200 40 --out cleaned --radius 10
 
-# 4. Convert frames to PowerPoint (widescreen 16:9)
-python frames_to_ppt.py
+# 4. Convert images folder to PowerPoint (widescreen 16:9, black background)
+python frames_to_ppt.py [folder] [output.pptx]
+python frames_to_ppt.py frames output.pptx --title "My Video"
+python frames_to_ppt.py frames output.pptx --captions --bg-color 1a1a2e
 ```
 
 **Architecture:**
-- Each script is a standalone stage in the pipeline. They share directory conventions: `frames/` for raw extracted frames, `cleaned/` for deduplicated output.
-- Deduplication uses perceptual hashing (`imagehash`) to skip visually identical frames.
-- `frames_to_ppt.py` generates `output.pptx`; the existing file is ~197 MB.
+
+- `video_to_frame.py` — opens video with OpenCV, prints metadata (resolution, FPS, duration), saves frames as `frame_XXXXXX.jpg` when `--save` is passed. Without `--save` it only reads and counts frames.
+
+- `deduplicate_frames.py` — computes perceptual hash (`imagehash.phash`, 8×8 DCT) for each JPEG, then compares **consecutive frames** (not all-pairs): if the hash distance ≤ threshold the later frame is deleted. Operates **in-place** on the input directory — it does not write to a separate folder.
+
+- `remove_watermark.py` — two modes:
+  - *Interactive*: opens the first image via `cv2.selectROI`, user draws a bounding box, prints the resulting `--coords` for reuse in batch runs.
+  - *Batch*: applies the same `(x, y, w, h)` region to every image. Builds a binary mask (with 2 px padding), then calls `cv2.inpaint` (TELEA fast or Navier-Stokes). Saves results to `--out` (default `cleaned/`).
+
+- `frames_to_ppt.py` — collects images from folder (sorted), fits each to 16:9 (13.33 × 7.5 in) with letterbox/pillarbox aspect-ratio preservation, adds as a picture on a blank slide with a solid background colour. Optional `--title` adds a title slide first; `--captions` adds filename text at the bottom of each slide. Output is `output.pptx` (existing file ~197 MB).
+
+**Typical full workflow:**
+```
+video_to_frame.py → frames/          (raw frames)
+deduplicate_frames.py frames         (removes near-duplicates in-place)
+remove_watermark.py frames --coords X Y W H --out cleaned   (writes to cleaned/)
+frames_to_ppt.py cleaned output.pptx
+```
