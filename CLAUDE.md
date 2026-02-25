@@ -21,18 +21,41 @@ This home directory contains three independent Python utility projects:
 cd KreedoCode
 source venv/bin/activate
 pip install -r requirements.txt
+# For Book_question.py (Streamlit app) — install separately:
+pip install streamlit langchain langchain-openai pydantic
+# For process_live_sheet.py (Google Sheets):
+pip install google-api-python-client google-auth
 ```
 
 **Run:**
 ```bash
-# Fetch activity JSON responses for a range of IDs
-python kreedo_fetch.py  # edit START_ACTIVITY_ID / END_ACTIVITY_ID at the bottom of the file
+# 1. Generate a fetch schedule splitting ID range across N days
+python create_schedule.py  # edit TOTAL_START_ID, TOTAL_END_ID, NUM_DAYS at the bottom; outputs schedule.json
+
+# 2a. Fetch a specific ID range directly
+python kreedo_fetch.py  # edit START_ACTIVITY_ID / END_ACTIVITY_ID at the bottom
+
+# 2b. Fetch using the schedule (processes all days, skips already-downloaded IDs)
+python daily_fetcher.py
+
+# 3. Convert cached JSON responses into relational DataFrames (prints to stdout as markdown tables)
+python json_to_table.py
+
+# 4. Run the Streamlit question-generation app (requires OPENAI_API_KEY)
+streamlit run Book_question.py
+
+# 5. Read from Google Sheets and find activities per child
+python process_live_sheet.py  # requires little-graduates-3663b17fa316.json service account file
 ```
 
 **Architecture:**
-- `kreedo_fetch.py` — iterates an ID range against `https://6t.kreedo.solutions/api/activity/activity_detail_mob/{id}`, saves each response to `kreedo_responses/<id>/<id>_response.json`, logs status to `kreedo_log.csv`. JWT token is hardcoded in `HEADERS` and expires; update it when you get 401 responses.
-- `Book_question.py` — reads activity JSON and generates structured questions.
-- `kreedo_responses/` — cached API responses (18 000+ folders); do not delete.
+- `kreedo_fetch.py` — iterates a hardcoded ID range against `https://6t.kreedo.solutions/api/activity/activity_detail_mob/{id}`, saves each response to `kreedo_responses/<id>/<id>_response.json`, logs to `kreedo_log.csv`. JWT token is hardcoded in `HEADERS`; update it on 401 errors.
+- `create_schedule.py` — `ActivityScheduler` class: shuffles the full ID range and splits into N daily chunks, saves to `schedule.json`.
+- `daily_fetcher.py` — reads `schedule.json`, iterates all days calling the same fetch logic as `kreedo_fetch.py`, skips already-downloaded IDs (checks for existing file before making the request).
+- `json_to_table.py` — scans all `kreedo_responses/**/*_response.json` files and builds relational DataFrames: `activities`, `materials`, `assets`, `activity_material_link`, `activity_asset_link`. Deduplicates materials and assets by ID.
+- `Book_question.py` — Streamlit app: upload PDFs → select question type (Short/Long Descriptive, MCQ, True/False, Word-Puzzle) → calls `gpt-4o-mini` via LangChain with a Pydantic structured output schema → displays results as a dataframe. `OPENAI_API_KEY` is set inline (replace the placeholder `*********`).
+- `process_live_sheet.py` — `ActivityManager` orchestrates `GoogleSheetsClient` (service account auth) → `ActivityDataProcessor` (reads two sheets, splits multi-activity cells on `$$` or `,`, merges on `LG Activity ID`) → `ChildActivityFinder` (filters by child name + shared group names like `pg`, `nur`, `lkg`, `ukg`). Spreadsheet ID and sheet names are hardcoded in `main()`.
+- `kreedo_responses/` — 18 000+ cached response folders; do not delete.
 
 ---
 
@@ -44,7 +67,7 @@ python kreedo_fetch.py  # edit START_ACTIVITY_ID / END_ACTIVITY_ID at the bottom
 ```bash
 cd KreedoDataFetcher
 source .venv/bin/activate
-pip install requests pandas openpyxl
+pip install -r requirements.txt  # requests==2.31.0, pandas, openpyxl
 ```
 
 **Run:**
@@ -52,19 +75,28 @@ pip install requests pandas openpyxl
 # Login with token, fetch children for a school
 python main.py --url <base_url> --token <jwt_token> --fetch-children --school-id <id>
 
-# Login with credentials (token is cached in .token file)
+# Login with credentials (token cached to .token for reuse)
 python main.py --url <base_url> --credentials <user_id> <password> --fetch-children --school-id <id>
 
-# Fetch activities (reads child/children.xlsx produced above)
+# Fetch completed activities for all children (reads child/children.xlsx)
 python main.py --url <base_url> --token <jwt_token> --fetch-activities --child-name all
+
+# Fetch activities for a specific child by name (partial match)
+python main.py --url <base_url> --token <jwt_token> --fetch-activities --child-name "John"
+
+# Debug: inspect raw API responses for subjects and activities
+python inspect_response.py  # reads .token and child/children.xlsx directly
 ```
 
 **Architecture:**
-- `auth.py` — `KreedoAuth` wraps a `requests.Session` with `Authorization: JWT <token>`. Supports token or credential login; credentials hit `POST /users/login`. Token is validated against `GET /users/logged_in_user_detail`.
-- `child_service.py` — two-phase fetch: list children via `GET /child/child_list_create` (paginated), then enrich each child with `GET /child/child_retrive_update_delete/{id}` and subjects via `POST /plan/subject_list_by_child`. Exports to `child/children.xlsx` (sheets: Children, Parents, Subjects). Activities are fetched from `POST /activity/flag_based_activity` and written to `child/child_activities.xlsx` with one sheet per child.
-- `main.py` — argparse CLI; token is persisted to `.token` and reused across runs.
+- `auth.py` — `KreedoAuth` wraps a `requests.Session` with `Authorization: JWT <token>`. Credential login hits `POST /users/login` and extracts token from `data.token` or `token`/`access_token` keys. Token validity is checked via `GET /users/logged_in_user_detail`.
+- `child_service.py` — two-phase fetch:
+  1. **Children**: paginated `GET /child/child_list_create` (limit=100), then per-child `GET /child/child_retrive_update_delete/{id}` + `POST /plan/subject_list_by_child` (needs `academic_session`, `child`, `user_id` decoded from JWT payload). Exports to `child/children.xlsx` with sheets: Children, Parents, Subjects.
+  2. **Activities**: reads `child/children.xlsx`, groups by child, fetches `POST /activity/flag_based_activity` (flag=`completed`, paginated limit=50). Exports to `child/child_activities.xlsx` with one sheet per child (sheet name sanitised to ≤30 chars).
+- `main.py` — argparse CLI; `--fetch-children` requires `--school-id`; `--fetch-activities` prompts for child name if `--child-name` not provided (defaults to `all` in non-interactive mode).
+- `inspect_response.py` — standalone debug script; reads `.token`, loads the first child from Excel, and prints raw subject + activity API responses.
 
-The API response may nest data under a `"data"` key; `child_service.py` handles both flat and nested response shapes.
+The API response may nest data under a `"data"` key; all service functions handle both flat and nested shapes. `user_id` is decoded from the JWT payload (base64, middle segment) and is required for subject fetching.
 
 ---
 
