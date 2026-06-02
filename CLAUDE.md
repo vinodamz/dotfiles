@@ -8,11 +8,70 @@ Persistent memory is stored at `~/.claude/projects/-Users-vinodamz/memory/MEMORY
 
 ## Projects Overview
 
-This home directory contains three independent Python utility projects:
-
+- **MontessoriTraineeTeacher** (`~/MontessoriTraineeTeacher/`) — Unified PHP+MySQL app combining the Trainee Teacher Assessment (formerly MTT) and the Task Manager (formerly LGTaskManager) into one login, one users table, two top-level modules (`assessment/` + `tasks/`). Live at https://mtt.thelittlegraduates.in/. → https://github.com/vinodamz/MontessoriTraineeTeacher
 - **KreedoCode** (`~/KreedoCode/`) — Bulk-fetches Kreedo activity data by ID range, saves JSON responses, and generates structured questions from educational content. → https://github.com/vinodamz/KreedoCode
 - **KreedoDataFetcher** (`~/KreedoDataFetcher/`) — CLI tool to authenticate with Kreedo's REST API and export child/activity records to Excel. → https://github.com/vinodamz/KreedoDataFetcher
 - **VideoFrane** (`~/VideoFrane/`) — Video processing pipeline: extract frames → deduplicate → remove watermarks → convert to PowerPoint. → https://github.com/vinodamz/VideoFrane
+
+> **Note:** `~/LGTaskManager/` and github.com/vinodamz/LGTaskManager still exist on disk and on GitHub but are **superseded** — all task-manager work now lives under `~/MontessoriTraineeTeacher/tasks/`. Treat that repo as a historical artifact.
+
+---
+
+## MontessoriTraineeTeacher (unified app)
+
+Single PHP+MySQL app combining the **Trainee Teacher Assessment** (formerly MTT) and the **Task Manager** (formerly LGTaskManager). One PIN-based login, one users table, role + per-module access. Live and serving at https://mtt.thelittlegraduates.in/.
+
+**Repo:** https://github.com/vinodamz/MontessoriTraineeTeacher (kept the name, will rename later)
+**Local path:** `~/MontessoriTraineeTeacher/`
+**Stack:** PHP 8.1+ / MySQL InnoDB utf8mb4 — server-rendered HTML, no build step
+**Hosting:** Hostgator cPanel (account `ideyyfbn`); docroot `/home/ideyyfbn/thelittlegraduates.in/mtt/`
+
+**File layout:**
+```
+~/MontessoriTraineeTeacher/
+├── index.php             # Unified home / module picker (single-module users auto-redirect)
+├── login.php             # PIN landing — one login for everyone
+├── logout.php
+├── admin.php             # Central user mgmt (role + per-module access)
+├── install.php           # First-admin bootstrap (delete after use)
+├── migrate.php           # Schema migrator — admin-only steady state; bootstrap mode when users table missing/legacy
+├── includes/             # auth.php, db.php, functions.php (union of both apps' helpers),
+│                         # header.php, footer.php, config.example.php
+├── assessment/           # Former MTT pages: index.php, assess.php, progress.php,
+│                         # baseline.php, custom_indicators.php, admin.php
+├── tasks/                # Former LGTaskManager pages: index.php, tasks.php, calendar.php,
+│                         # admin.php, debug-recurrences.php, reset-opcache.php
+├── assets/css/           # style.css (MTT base, wins cascade) + tasks.css (LG selectors, loaded first)
+├── assets/js/            # login.js, assess.js, kanban.js
+└── sql/                  # schema.sql (fresh-DB unified schema),
+                          # migrate_001_unify_users.sql (in-place upgrade), seeds.sql
+```
+
+**Auth + data model:**
+- One `users` table with `role ENUM('teacher','admin')` and `modules SET('tasks','montessori')`. Admins implicitly access all modules.
+- Sessions store `user_id` / `user_name` / `user_role` / `user_modules`.
+- `current_user()` / `require_login()` / `require_admin()` / `require_module($name)` live in `includes/auth.php`.
+- PINs: bcrypt-hashed, rate-limited (5 tries → 30 s lock), 4–6 digit numeric.
+- The old `teachers` table no longer exists — its rows were merged into `users` with IDs preserved. Every FK in `students` / `evaluation_cards` / `assessments` / `assessment_comments` / `student_baselines` / `student_custom_indicators` now points at `users(id)` instead of `teachers(id)`.
+
+**Live DB snapshot (after migrate_001_unify_users.sql ran on 2026-05-18):**
+- 6 users (4 teachers + 2 admins, IDs preserved from old `teachers`)
+- 41 students, 443 evaluation_cards, 132 assessments, 37 assessment_comments, 40 student_baselines (all intact)
+- 119 skill_indicators, 6 rating_config rows, 0 student_custom_indicators
+- task_columns seeded with default 3 (To do / In progress / Done); task_recurrences + tasks empty
+- Stray LGTaskManager `users` / `tasks` / `task_columns` / `task_recurrences` tables from an earlier LG deployment against the MTT database were dropped via `/migrate.php?confirm=drop-legacy-lg` before the unification migration ran.
+
+**Deploy pipeline** (identical to the old MTT + LGTaskManager flow):
+GitHub Actions `php -l` lint → cPanel UAPI `VersionControl/update` → `VersionControlDeployment/create` runs `.cpanel.yml` rsync. No build, no deploy branch.
+- cPanel repo clone path: `/home/ideyyfbn/repos/MontessoriTraineeTeacher` tracking `main`
+- Required GitHub secrets: `CPANEL_HOST`, `CPANEL_USER`, `CPANEL_TOKEN`
+- `includes/config.php` is gitignored and excluded from rsync — the live server keeps its own copy with DB credentials
+
+**Gotchas (battle-scarred):**
+1. **Hostgator file-permission gotcha** — `.cpanel.yml` MUST chmod 755 the docroot + parent, then `find -type d -exec chmod 755 {} +` and `find -type f -exec chmod 644 {} +` after rsync, or every URL 404s. Already handled in the current `.cpanel.yml`.
+2. **Live `includes/config.php` is out of sync with the example** — `includes/config.example.php` is now branded as "Little Graduates" with `'session_name' => 'LG_SESSION'`, but the live server's `config.php` was not overwritten by deploy. So the live session cookie is still `MTT_SESSION` and the visible app name is "Trainee Teacher Assessment" until someone edits that file on the server.
+3. **CSS conflict on .pin-overlay** — `tasks.css` (LG) sets `.pin-overlay { opacity: 0 }` for an `.is-open` class-driven fade-in animation that the unified `login.js` doesn't use. `style.css` overrides with `opacity: 1` and `transform: none` on `.pin-overlay` / `.pin-modal`. If a modal-like component ever shows up "click does nothing", check computed opacity first.
+4. **`migrate.php` has a bootstrap mode** — when `users_table_state()` returns `'missing'` or `'legacy'`, the page bypasses `require_admin()` because `login.php` can't query the DB yet. Once state is `'unified'`, `/migrate.php` reverts to admin-only. Intentional; gated by an idempotent state check, not a feature flag.
 
 ---
 
